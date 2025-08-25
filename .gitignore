@@ -1,0 +1,19 @@
+# Python / IDE
+__pycache__/
+*.pyc
+.vscode/
+.venv/
+
+# Ultralytics outputs
+runs/
+
+# Datasets and large generated pools (kept outside Git)
+data/pv_raw/
+data/tv_raw/
+data/pd_raw/
+data/images/
+data/labels/
+
+# Keep tiny config files in data/
+!data/tomato.yaml
+!data/*.md
