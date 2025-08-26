@@ -14,6 +14,7 @@ import { testFirebaseConnection, addTestSensorData, addTestDiseaseDetection } fr
 import SensorCard from './components/SensorCard';
 import WeatherCard from './components/WeatherCard';
 import DiseaseAlert from './components/DiseaseAlert';
+import WateringSystemStatus from './components/WateringSystemStatus';
 
 // Icons
 import AddIcon from '@mui/icons-material/Add';
@@ -402,7 +403,12 @@ function App() {
           </Card>
         </Grid>
       </Grid>
-
+    
+      {sensorData && Object.keys(sensorData).length > 0 && (
+        <Grid item xs={12} md={6}>
+          <WateringSystemStatus sensorData={sensorData['esp32_greenhouse_001']} />
+        </Grid>
+      )}
       {/* Control Center */}
       <Paper elevation={0} sx={{ 
         p: 3, 
