@@ -1,54 +1,55 @@
 import React from 'react';
-import { Card, CardContent, Typography, Box, Chip, LinearProgress } from '@mui/material';
+import { Card, CardContent, Typography, Box, Chip, LinearProgress, alpha } from '@mui/material';
 import { keyframes } from '@mui/system';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import TrendingFlatIcon from '@mui/icons-material/TrendingFlat';
 
 const shimmer = keyframes`
-  0% { background-position: -200px 0; }
-  100% { background-position: calc(200px + 100%) 0; }
+  0% { 
+    background-position: -200px 0;
+    opacity: 0.3;
+  }
+  100% { 
+    background-position: calc(200px + 100%) 0;
+    opacity: 0.6;
+  }
 `;
 
-const countUp = keyframes`
-  from { opacity: 0; transform: translateY(20px) scale(0.8); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-`;
-
-const SensorCard = ({ title, value, unit, optimal, icon }) => {
+const  SensorCard = ({ title, value, unit, optimal, icon }) => {
   const getStatus = (value, optimal) => {
     if (!value || !optimal) return { 
-      color: 'default', 
+      color: 'text.secondary',
       label: 'No Data', 
-      bgColor: 'rgba(158, 158, 158, 0.1)',
+      bgGradient: 'linear-gradient(135deg, #F5F5F5 0%, #EEEEEE 100%)',
       progress: 0,
       trend: 'flat'
     };
     
-    const percentage = ((value - optimal[0]) / (optimal[1] - optimal[0])) * 100;
+    const percentage = ((value - optimal[0]) / (optimal[12] - optimal)) * 100;
     const clampedPercentage = Math.max(0, Math.min(100, percentage));
     
-    if (value >= optimal[0] && value <= optimal[1]) {
+    if (value >= optimal && value <= optimal[12]) {
       return { 
-        color: 'success', 
+        color: 'success.main',
         label: 'Optimal', 
-        bgColor: 'rgba(76, 175, 80, 0.1)',
+        bgGradient: 'linear-gradient(135deg, rgba(0, 200, 83, 0.08) 0%, rgba(105, 240, 174, 0.08) 100%)',
         progress: clampedPercentage,
         trend: 'up'
       };
-    } else if (value < optimal[0] * 0.8 || value > optimal[1] * 1.2) {
+    } else if (value < optimal * 0.8 || value > optimal[12] * 1.2) {
       return { 
-        color: 'error', 
+        color: 'error.main',
         label: 'Critical', 
-        bgColor: 'rgba(229, 57, 53, 0.1)',
+        bgGradient: 'linear-gradient(135deg, rgba(255, 87, 34, 0.08) 0%, rgba(255, 138, 101, 0.08) 100%)',
         progress: clampedPercentage,
         trend: 'down'
       };
     } else {
       return { 
-        color: 'warning', 
+        color: 'warning.main',
         label: 'Attention', 
-        bgColor: 'rgba(255, 143, 0, 0.1)',
+        bgGradient: 'linear-gradient(135deg, rgba(255, 179, 0, 0.08) 0%, rgba(255, 213, 79, 0.08) 100%)',
         progress: clampedPercentage,
         trend: 'flat'
       };
@@ -58,26 +59,24 @@ const SensorCard = ({ title, value, unit, optimal, icon }) => {
   const status = getStatus(value, optimal);
 
   const getTrendIcon = () => {
+    const iconStyle = { fontSize: 20, mr: 0.5 };
     switch (status.trend) {
-      case 'up': return <TrendingUpIcon sx={{ fontSize: 20, color: 'success.main' }} />;
-      case 'down': return <TrendingDownIcon sx={{ fontSize: 20, color: 'error.main' }} />;
-      default: return <TrendingFlatIcon sx={{ fontSize: 20, color: 'warning.main' }} />;
+      case 'up': return <TrendingUpIcon sx={{ ...iconStyle, color: 'success.main' }} />;
+      case 'down': return <TrendingDownIcon sx={{ ...iconStyle, color: 'error.main' }} />;
+      default: return <TrendingFlatIcon sx={{ ...iconStyle, color: 'warning.main' }} />;
     }
   };
 
   return (
     <Card sx={{ 
-      height: '100%', 
-      bgcolor: status.bgColor,
-      border: `2px solid ${
-        status.color === 'success' ? 'rgba(76, 175, 80, 0.3)' : 
-        status.color === 'warning' ? 'rgba(255, 143, 0, 0.3)' : 
-        status.color === 'error' ? 'rgba(229, 57, 53, 0.3)' : 
-        'rgba(158, 158, 158, 0.3)'
-      }`,
-      borderRadius: 4,
-      overflow: 'hidden',
+      height: '100%',
+      background: status.bgGradient,
+      backdropFilter: 'blur(10px)',
+      border: `2px solid ${alpha(status.color === 'success.main' ? '#00C853' : 
+                                 status.color === 'warning.main' ? '#FFB300' : 
+                                 status.color === 'error.main' ? '#FF5722' : '#78909C', 0.2)}`,
       position: 'relative',
+      overflow: 'hidden',
       '&::before': {
         content: '""',
         position: 'absolute',
@@ -86,93 +85,109 @@ const SensorCard = ({ title, value, unit, optimal, icon }) => {
         width: '200px',
         height: '100%',
         background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
-        animation: `${shimmer} 3s infinite`,
+        animation: `${shimmer} 4s infinite`,
       },
       '&:hover': { 
-        transform: 'translateY(-8px) scale(1.02)',
-        boxShadow: `0 16px 48px ${
-          status.color === 'success' ? 'rgba(76, 175, 80, 0.25)' : 
-          status.color === 'warning' ? 'rgba(255, 143, 0, 0.25)' : 
-          status.color === 'error' ? 'rgba(229, 57, 53, 0.25)' : 
-          'rgba(158, 158, 158, 0.25)'
-        }`,
-      },
-      transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+        transform: 'translateY(-6px) scale(1.02)',
+        transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+      }
     }}>
       <CardContent sx={{ p: 3 }}>
         {/* Header */}
         <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
           <Box>
-            <Typography variant="body1" color="text.secondary" sx={{ fontWeight: 600, mb: 0.5 }}>
+            <Typography variant="body1" sx={{ 
+              color: 'text.primary', 
+              fontWeight: 700, 
+              mb: 0.5,
+              fontSize: '1rem'
+            }}>
               {title}
             </Typography>
-            <Box display="flex" alignItems="center" gap={1}>
+            <Box display="flex" alignItems="center">
               {getTrendIcon()}
-              <Typography variant="caption" color="text.secondary">
-                Real-time
+              <Typography variant="caption" sx={{ 
+                color: 'text.secondary',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px'
+              }}>
+                Live Data
               </Typography>
             </Box>
           </Box>
-          <Typography variant="h2" sx={{ fontSize: '3rem', lineHeight: 1 }}>
+          <Typography variant="h2" sx={{ 
+            fontSize: '3rem', 
+            lineHeight: 1,
+            filter: 'drop-shadow(0 2px 4px rgba(55, 71, 79, 0.1))'
+          }}>
             {icon}
           </Typography>
         </Box>
         
         {/* Main Value */}
-        <Box sx={{ animation: `${countUp} 0.8s ease-out` }}>
-          <Typography variant="h2" component="div" sx={{ 
-            color: status.color === 'success' ? 'success.main' : 
-                   status.color === 'warning' ? 'warning.main' : 
-                   status.color === 'error' ? 'error.main' : 'text.secondary',
-            fontWeight: 800,
-            mb: 1,
-            fontSize: '2.5rem',
-            letterSpacing: '-0.02em'
-          }}>
-            {value ? `${value.toFixed(1)}${unit}` : '--'}
-          </Typography>
-        </Box>
+        <Typography variant="h3" component="div" sx={{ 
+          color: status.color,
+          fontWeight: 800,
+          mb: 2,
+          fontSize: '2.75rem',
+          letterSpacing: '-0.02em',
+          textShadow: '0 2px 4px rgba(55, 71, 79, 0.1)'
+        }}>
+          {value ? `${value.toFixed(1)}${unit}` : '--'}
+        </Typography>
         
-        {/* Progress Bar */}
-        <LinearProgress 
-          variant="determinate" 
-          value={status.progress} 
-          sx={{ 
-            mb: 2,
-            height: 6,
-            borderRadius: 3,
-            backgroundColor: 'rgba(0,0,0,0.05)',
-            '& .MuiLinearProgress-bar': {
-              backgroundColor: status.color === 'success' ? 'success.main' : 
-                              status.color === 'warning' ? 'warning.main' : 
-                              status.color === 'error' ? 'error.main' : 'grey.400',
-              borderRadius: 3,
-            }
-          }}
-        />
+        {/* Enhanced Progress Bar */}
+        <Box sx={{ position: 'relative', mb: 2 }}>
+          <LinearProgress 
+            variant="determinate" 
+            value={status.progress}
+            sx={{ 
+              height: 10,
+              borderRadius: 5,
+              backgroundColor: alpha('#37474F', 0.1),
+              '& .MuiLinearProgress-bar': {
+                borderRadius: 5,
+                background: status.color === 'success.main' 
+                  ? 'linear-gradient(90deg, #00C853, #69F0AE)' 
+                  : status.color === 'warning.main' 
+                  ? 'linear-gradient(90deg, #FFB300, #FFD54F)'
+                  : 'linear-gradient(90deg, #FF5722, #FF8A65)',
+              }
+            }}
+          />
+        </Box>
         
         {/* Footer */}
         <Box display="flex" justifyContent="space-between" alignItems="center">
           <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
-              Target: {optimal[0]}-{optimal[1]}{unit}
+            <Typography variant="caption" sx={{ 
+              color: 'text.secondary', 
+              fontWeight: 600,
+              display: 'block'
+            }}>
+              Range: {optimal}-{optimal[12]}{unit}
             </Typography>
-            <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.25 }}>
+            <Typography variant="caption" sx={{ 
+              color: 'text.secondary', 
+              opacity: 0.8 
+            }}>
               {value ? new Date().toLocaleTimeString('en-IN', { 
                 hour: '2-digit', 
                 minute: '2-digit' 
-              }) : 'Never'}
+              }) : 'No data'}
             </Typography>
           </Box>
           <Chip 
             label={status.label} 
-            color={status.color} 
-            size="small"
-            variant="filled"
-            sx={{ 
+            sx={{
+              backgroundColor: alpha(status.color === 'success.main' ? '#00C853' : 
+                                   status.color === 'warning.main' ? '#FFB300' : '#FF5722', 0.15),
+              color: status.color,
               fontWeight: 700,
               fontSize: '0.75rem',
-              boxShadow: 1
+              border: `1px solid ${alpha(status.color === 'success.main' ? '#00C853' : 
+                                       status.color === 'warning.main' ? '#FFB300' : '#FF5722', 0.3)}`,
             }}
           />
         </Box>
