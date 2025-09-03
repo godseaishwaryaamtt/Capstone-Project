@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""
+AgroRakshak - Integrated Laptop Webcam Disease Detection
+Simple, reliable tomato disease detection using built-in camera
+"""
+
+from ultralytics import YOLO
+import cv2
+import numpy as np
+import time
+import os
+
+class LaptopWebcamDetector:
+    def __init__(self, model_path):
+        self.model = YOLO(model_path)
+        self.webcam = None
+        
+        # Tomato disease mapping with anti-spam thresholds
+        self.diseases = {
+            8: {'name': 'Tomato Bacterial Spot', 'min_conf': 0.4, 'color': (0, 100, 255), 'risk': 'HIGH'},
+            9: {'name': 'Tomato Early Blight', 'min_conf': 0.7, 'color': (0, 165, 255), 'risk': 'MEDIUM'},  # High threshold to prevent spam
+            10: {'name': 'Tomato Late Blight', 'min_conf': 0.4, 'color': (0, 0, 255), 'risk': 'CRITICAL'},
+            11: {'name': 'Tomato Leaf Mold', 'min_conf': 0.4, 'color': (0, 200, 200), 'risk': 'MEDIUM'},
+            12: {'name': 'Tomato Septoria Leaf Spot', 'min_conf': 0.4, 'color': (100, 150, 255), 'risk': 'MEDIUM'},
+            13: {'name': 'Tomato Target Spot', 'min_conf': 0.4, 'color': (50, 100, 255), 'risk': 'MEDIUM'},
+            14: {'name': 'Healthy Tomato', 'min_conf': 0.3, 'color': (0, 255, 0), 'risk': 'NONE'}
+        }
+        
+        self.last_detection_time = 0
+        self.detection_count = 0
+    
+    def setup_laptop_camera(self):
+        """Setup laptop's integrated webcam (index 0)"""
+        print("🎥 Setting up laptop's integrated webcam...")
+        
+        # Open laptop camera (index 0)
+        self.webcam = cv2.VideoCapture(0)
+        
+        if not self.webcam.isOpened():
+            print("❌ Failed to open laptop webcam")
+            return False
+        
+        # Optimize settings for disease detection
+        self.webcam.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        self.webcam.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        self.webcam.set(cv2.CAP_PROP_FPS, 30)
+        
+        # Adjust exposure and brightness for better plant detection
+        self.webcam.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # Manual exposure
+        self.webcam.set(cv2.CAP_PROP_BRIGHTNESS, 128)
+        self.webcam.set(cv2.CAP_PROP_CONTRAST, 128)
+        self.webcam.set(cv2.CAP_PROP_SATURATION, 128)
+        
+        # Test capture
+        ret, test_frame = self.webcam.read()
+        if ret and test_frame is not None:
+            print(f"✅ Laptop webcam ready: {test_frame.shape}")
+            return True
+        else:
+            print("❌ Webcam test failed")
+            return False
+    
+    def preprocess_frame(self, frame):
+        """Optimize frame for disease detection"""
+        # Resize to model input size
+        resized = cv2.resize(frame, (640, 640))
+        
+        # Enhance contrast for disease spots
+        lab = cv2.cvtColor(resized, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        l = clahe.apply(l)
+        enhanced = cv2.merge([l, a, b])
+        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+        
+        return enhanced
+    
+    def detect_diseases(self, frame):
+        """Detect tomato diseases with anti-spam protection"""
+        current_time = time.time()
+        
+        # Rate limiting - max 1 detection every 2 seconds
+        if current_time - self.last_detection_time < 2.0:
+            return None
+        
+        # Preprocess and run detection
+        processed = self.preprocess_frame(frame)
+        results = self.model(processed, conf=0.3, iou=0.4, verbose=False)
+        
+        best_detection = None
+        best_confidence = 0
+        
+        if len(results) > 0 and len(results[0].boxes) > 0:
+            for box in results[0].boxes:
+                cls_id = int(box.cls[0])
+                confidence = float(box.conf[0])
+                
+                if cls_id in self.diseases:
+                    # Apply disease-specific confidence thresholds
+                    required_conf = self.diseases[cls_id]['min_conf']
+                    
+                    if confidence >= required_conf and confidence > best_confidence:
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
+                        area = (x2-x1) * (y2-y1)
+                        
+                        # Size filtering for reasonable leaf detections
+                        if 1500 < area < 300000:
+                            best_detection = {
+                                'class_id': cls_id,
+                                'confidence': confidence,
+                                'bbox': (x1, y1, x2, y2),
+                                'disease': self.diseases[cls_id]
+                            }
+                            best_confidence = confidence
+        
+        if best_detection:
+            self.last_detection_time = current_time
+            return best_detection
+        
+        return None
+    
+    def draw_results(self, frame, detection):
+        """Draw detection results on frame"""
+        height, width = frame.shape[:2]
+        
+        if detection:
+            disease = detection['disease']
+            confidence = detection['confidence']
+            x1, y1, x2, y2 = detection['bbox']
+            
+            # Scale bbox to original frame size
+            scale_x = width / 640
+            scale_y = height / 640
+            x1, x2 = int(x1 * scale_x), int(x2 * scale_x)
+            y1, y2 = int(y1 * scale_y), int(y2 * scale_y)
+            
+            # Draw bounding box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), disease['color'], 4)
+            
+            # Status banner
+            cv2.rectangle(frame, (0, 0), (width, 120), disease['color'], -1)
+            
+            # Disease information
+            cv2.putText(frame, f"DETECTED: {disease['name']}", (15, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.3, (255, 255, 255), 3)
+            cv2.putText(frame, f"Confidence: {confidence:.1%} | Risk: {disease['risk']}", (15, 85), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            
+            # Treatment recommendations
+            treatments = {
+                8: 'Apply copper fungicide, remove infected plants',
+                9: 'Improve air circulation, apply fungicide',
+                10: 'URGENT: Apply fungicide immediately!',
+                11: 'Reduce humidity, improve ventilation',
+                12: 'Remove lower leaves, apply fungicide',
+                13: 'Apply preventive fungicide',
+                14: 'Continue regular plant care'
+            }
+            
+            treatment = treatments.get(detection['class_id'], 'Consult expert')
+            cv2.putText(frame, f"Action: {treatment}", (15, height-25), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            
+        else:
+            # Scanning mode
+            cv2.rectangle(frame, (0, 0), (width, 80), (100, 100, 100), -1)
+            cv2.putText(frame, "🔍 SCANNING FOR TOMATO DISEASES...", (15, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+        
+        # Camera info
+        cv2.putText(frame, "Laptop Webcam", (width-180, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        return frame
+    
+    def run_detection(self):
+        """Main detection loop"""
+        if not self.setup_laptop_camera():
+            print("\n❌ WEBCAM SETUP FAILED")
+            print("💡 Try:")
+            print("   - Close other camera apps (Zoom, Teams, etc.)")
+            print("   - Check Windows camera permissions")
+            print("   - Restart the application")
+            return
+        
+        print("\n🍅 AgroRakshak - Laptop Webcam Detection")
+        print("📹 Using: Integrated laptop webcam")
+        print("🛡️  Early Blight spam protection: Active")
+        print("📋 Show tomato leaves or printed disease images")
+        print("Controls: 'q'=Quit, 's'=Screenshot")
+        print("="*60)
+        
+        try:
+            while True:
+                ret, frame = self.webcam.read()
+                if not ret:
+                    print("❌ Failed to capture frame")
+                    break
+                
+                # Mirror flip for natural interaction
+                frame = cv2.flip(frame, 1)
+                
+                # Detect diseases
+                detection = self.detect_diseases(frame)
+                
+                # Console output
+                if detection:
+                    self.detection_count += 1
+                    disease_name = detection['disease']['name']
+                    confidence = detection['confidence']
+                    risk = detection['disease']['risk']
+                    
+                    print(f"🦠 DETECTION #{self.detection_count}: {disease_name}")
+                    print(f"   📊 Confidence: {confidence:.1%}")
+                    print(f"   ⚠️  Risk Level: {risk}")
+                
+                # Draw and display results
+                display_frame = self.draw_results(frame, detection)
+                cv2.imshow('AgroRakshak - Tomato Disease Detection', display_frame)
+                
+                # Handle key presses
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'):
+                    print("\n🛑 Detection stopped by user")
+                    break
+                elif key == ord('s'):
+                    timestamp = time.strftime("%Y%m%d_%H%M%S")
+                    filename = f"agrorakshak_detection_{timestamp}.jpg"
+                    cv2.imwrite(filename, display_frame)
+                    print(f"📷 Screenshot saved: {filename}")
+                    
+        except KeyboardInterrupt:
+            print("\n⚠️  Detection interrupted")
+        
+        finally:
+            if self.webcam:
+                self.webcam.release()
+            cv2.destroyAllWindows()
+            print(f"✅ Session completed. Total detections: {self.detection_count}")
+
+def main():
+    """Main function"""
+    print("🍅 AgroRakshak - Tomato Disease Detection System")
+    print("Using laptop's integrated webcam")
+    print("="*60)
+    
+    model_path = 'training/results/gpu_optimized/weights/best.pt'
+    
+    # Check model exists
+    if not os.path.exists(model_path):
+        print(f"❌ Model not found: {model_path}")
+        print("Please check the model path and try again")
+        return
+    
+    try:
+        detector = LaptopWebcamDetector(model_path)
+        detector.run_detection()
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        print("Please check your setup and try again")
+
+if __name__ == "__main__":
+    main()

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-AgroRakshak Real-Time Webcam Plant Disease Detection
-Enhanced version with clean disease name display
-Test your 99.5% mAP50 model using laptop webcam
+AgroRakshak - Tomato Early Blight Specialist
+Optimized specifically for detecting tomato early blight
 """
 
 from ultralytics import YOLO
@@ -10,301 +9,203 @@ import cv2
 import numpy as np
 import time
 
-# Enhanced disease class names with clean formatting
-CLASS_NAMES = {
-    0: 'Apple___Apple_scab',
-    1: 'Apple___Black_rot', 
-    2: 'Apple___Cedar_apple_rust',
-    3: 'Apple___healthy',
-    4: 'Corn_(maize)___Common_rust_',
-    5: 'Corn_(maize)___Northern_Leaf_Blight',
-    6: 'Corn_(maize)___healthy',
-    7: 'Tomato___Bacterial_spot',
-    8: 'Tomato___Early_blight'
-}
-
-# Color scheme for different disease types
-COLORS = {
-    'healthy': (0, 255, 0),      # Green for healthy
-    'disease': (0, 0, 255),      # Red for diseases
-    'apple': (255, 0, 0),        # Blue for apple
-    'corn': (0, 255, 255),       # Yellow for corn
-    'tomato': (255, 0, 255)      # Magenta for tomato
-}
-
-def format_disease_name(raw_name):
-    """Convert raw dataset names to readable disease names"""
-    # Remove underscores and clean formatting
-    clean_name = raw_name.replace('___', ' - ').replace('_', ' ')
-    clean_name = clean_name.replace('(maize)', '').strip()
+class EarlyBlightDetector:
+    def __init__(self, model_path):
+        self.model = YOLO(model_path)
+        
+    def enhance_for_early_blight(self, frame):
+        """Enhanced preprocessing specifically for early blight lesions"""
+        
+        # 1. Convert to Lab color space for better lesion contrast
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        
+        # 2. Enhance L channel for better spot visibility
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        l = clahe.apply(l)
+        
+        enhanced_lab = cv2.merge([l, a, b])
+        enhanced = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
+        
+        # 3. Sharpen to enhance small lesion edges
+        kernel = np.array([[-1,-1,-1,-1,-1],
+                          [-1, 2, 2, 2,-1],
+                          [-1, 2, 8, 2,-1], 
+                          [-1, 2, 2, 2,-1],
+                          [-1,-1,-1,-1,-1]]) / 8.0
+        sharpened = cv2.filter2D(enhanced, -1, kernel)
+        
+        # 4. Enhance brown/dark spots typical of early blight
+        hsv = cv2.cvtColor(sharpened, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        
+        # Boost saturation for better disease spot visibility
+        s = cv2.add(s, 25)
+        s = np.clip(s, 0, 255)
+        
+        result = cv2.merge([h, s, v])
+        result = cv2.cvtColor(result, cv2.COLOR_HSV2BGR)
+        
+        return result
     
-    # Handle specific formatting cases
-    if 'Apple - Apple scab' in clean_name:
-        return 'Apple Scab'
-    elif 'Apple - Black rot' in clean_name:
-        return 'Apple Black Rot'
-    elif 'Apple - Cedar apple rust' in clean_name:
-        return 'Apple Cedar Rust'
-    elif 'Apple - healthy' in clean_name:
-        return 'Healthy Apple'
-    elif 'Corn - Common rust' in clean_name:
-        return 'Corn Common Rust'
-    elif 'Corn - Northern Leaf Blight' in clean_name:
-        return 'Corn Northern Leaf Blight'
-    elif 'Corn - healthy' in clean_name:
-        return 'Healthy Corn'
-    elif 'Tomato - Bacterial spot' in clean_name:
-        return 'Tomato Bacterial Spot'
-    elif 'Tomato - Early blight' in clean_name:
-        return 'Tomato Early Blight'
-    else:
-        return clean_name.title()
+    def detect_with_multi_scale(self, frame):
+        """Multi-scale detection for small early blight lesions"""
+        detections = []
+        
+        # Test multiple confidence thresholds for early blight sensitivity
+        confidence_levels = [0.1, 0.15, 0.2, 0.25]
+        
+        for conf in confidence_levels:
+            try:
+                results = self.model(frame, conf=conf, iou=0.3, verbose=False)
+                
+                if len(results) > 0 and len(results.boxes) > 0:
+                    for box in results.boxes:
+                        cls_id = int(box.cls)
+                        confidence = float(box.conf)
+                        
+                        # Focus specifically on tomato early blight (class 8)
+                        if cls_id == 8:  # Tomato Early Blight
+                            detections.append({
+                                'class_id': cls_id,
+                                'confidence': confidence,
+                                'bbox': box.xyxy.tolist(),
+                                'detection_level': conf
+                            })
+                            
+                            print(f"🔍 Early Blight detected at confidence {conf}: {confidence:.3f}")
+                            
+            except Exception as e:
+                continue
+        
+        # Return highest confidence detection
+        if detections:
+            return max(detections, key=lambda x: x['confidence'])
+        return None
 
-def get_disease_info(class_name):
-    """Get detailed disease information"""
-    disease_info = {
-        'Apple Scab': {
-            'severity': 'High',
-            'description': 'Fungal disease causing dark spots on leaves',
-            'action': 'Apply fungicide treatment'
-        },
-        'Apple Black Rot': {
-            'severity': 'High', 
-            'description': 'Serious fungal disease affecting fruit and leaves',
-            'action': 'Remove infected parts, apply copper spray'
-        },
-        'Apple Cedar Rust': {
-            'severity': 'Medium',
-            'description': 'Fungal disease causing orange spots',
-            'action': 'Improve air circulation, fungicide if severe'
-        },
-        'Corn Common Rust': {
-            'severity': 'Medium',
-            'description': 'Fungal disease with rust-colored pustules',
-            'action': 'Monitor and apply fungicide if spreading'
-        },
-        'Corn Northern Leaf Blight': {
-            'severity': 'High',
-            'description': 'Destructive fungal disease with large lesions',
-            'action': 'Remove affected leaves, apply fungicide'
-        },
-        'Tomato Bacterial Spot': {
-            'severity': 'High',
-            'description': 'Bacterial infection causing leaf spots',
-            'action': 'Remove infected plants, apply copper treatment'
-        },
-        'Tomato Early Blight': {
-            'severity': 'Medium',
-            'description': 'Fungal disease with dark concentric spots',
-            'action': 'Improve air flow, apply preventive fungicide'
-        }
-    }
-    return disease_info.get(class_name, {'severity': 'Unknown', 'description': 'Disease detected', 'action': 'Consult agricultural expert'})
-
-def get_disease_color(class_name):
-    """Get color based on disease type"""
-    if 'healthy' in class_name.lower():
-        return COLORS['healthy']
-    elif 'Apple' in class_name:
-        return COLORS['apple']
-    elif 'Corn' in class_name:
-        return COLORS['corn'] 
-    elif 'Tomato' in class_name:
-        return COLORS['tomato']
-    else:
-        return COLORS['disease']
-
-def draw_predictions(frame, results, fps):
-    """Draw predictions with detailed disease information"""
+def draw_early_blight_results(frame, detection):
+    """Specialized display for early blight detection"""
     height, width = frame.shape[:2]
     
-    # Draw title and model info
-    cv2.putText(frame, "AgroRakshak Plant Disease Detection", 
-                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-    cv2.putText(frame, f"Model Accuracy: 99.5% mAP50 | FPS: {fps:.1f}", 
-                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+    # Title
+    cv2.putText(frame, "AgroRakshak - Early Blight Specialist", 
+                (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
     
-    # Draw predictions
-    if len(results) > 0 and len(results[0].boxes) > 0:
-        boxes = results[0].boxes
+    if detection:
+        confidence = detection['confidence']
+        x1, y1, x2, y2 = map(int, detection['bbox'])
+        detection_level = detection['detection_level']
         
-        for i in range(len(boxes)):
-            # Get prediction data
-            cls_id = int(boxes.cls[i])
-            confidence = float(boxes.conf[i])
-            x1, y1, x2, y2 = map(int, boxes.xyxy[i])
-            
-            # Get clean disease name and info
-            raw_name = CLASS_NAMES.get(cls_id, f'Class_{cls_id}')
-            disease_name = format_disease_name(raw_name)
-            disease_info = get_disease_info(disease_name)
-            color = get_disease_color(raw_name)
-            
-            # Draw bounding box with thicker line for better visibility
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
-            
-            # Prepare enhanced labels
-            main_label = f"🔍 {disease_name}"
-            conf_label = f"Confidence: {confidence:.1%}"
-            severity_label = f"Severity: {disease_info['severity']}"
-            
-            # Calculate label background size
-            labels = [main_label, conf_label, severity_label]
-            max_width = 0
-            total_height = 10
-            
-            for label in labels:
-                (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                max_width = max(max_width, w)
-                total_height += h + 5
-            
-            # Draw label background with semi-transparency effect
-            overlay = frame.copy()
-            cv2.rectangle(overlay, (x1, y1 - total_height), 
-                         (x1 + max_width + 20, y1), (0, 0, 0), -1)
-            cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
-            
-            # Draw text labels with better formatting
-            y_offset = y1 - total_height + 25
-            
-            # Main disease name (larger, bold)
-            cv2.putText(frame, main_label, (x1 + 10, y_offset), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            y_offset += 25
-            
-            # Confidence score
-            cv2.putText(frame, conf_label, (x1 + 10, y_offset), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-            y_offset += 20
-            
-            # Severity level with color coding
-            severity_color = (0, 0, 255) if disease_info['severity'] == 'High' else (0, 165, 255) if disease_info['severity'] == 'Medium' else (0, 255, 0)
-            cv2.putText(frame, severity_label, (x1 + 10, y_offset), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, severity_color, 1)
-            
-            # Add action recommendation below the box
-            if 'healthy' not in disease_name.lower():
-                action_text = f"💡 {disease_info['action']}"
-                cv2.putText(frame, action_text, (x1, y2 + 25), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # High visibility red for early blight
+        color = (0, 0, 255)
         
-        # Display detection summary in corner
-        detection_count = len(boxes)
-        healthy_count = sum(1 for i in range(len(boxes)) if 'healthy' in format_disease_name(CLASS_NAMES.get(int(boxes.cls[i]), '')).lower())
-        disease_count = detection_count - healthy_count
+        # Draw detection box
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 4)
         
-        summary_text = f"Detections: {detection_count} | Healthy: {healthy_count} | Diseases: {disease_count}"
-        cv2.putText(frame, summary_text, (10, height - 90), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        # Early blight specific information
+        disease_text = "🦠 TOMATO EARLY BLIGHT DETECTED"
+        conf_text = f"📊 Confidence: {confidence:.1%}"
+        level_text = f"🎯 Detection Level: {detection_level}"
+        
+        # Symptoms information
+        symptoms_text = "📋 Symptoms: Dark concentric rings on leaves"
+        action_text = "💡 Action: Apply fungicide, improve air flow"
+        
+        texts = [disease_text, conf_text, level_text, symptoms_text, action_text]
+        
+        # Background box
+        max_width = max(cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2) for text in texts)
+        cv2.rectangle(frame, (x1, y1 - 160), (x1 + max_width + 20, y1), (0, 0, 0), -1)
+        
+        # Draw texts
+        y_pos = y1 - 140
+        for text in texts:
+            cv2.putText(frame, text, (x1 + 10, y_pos), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            y_pos += 25
+        
+        # Urgency warning
+        cv2.putText(frame, "⚠️  HIGH PRIORITY: Immediate treatment required", 
+                   (10, height - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
     
     else:
-        # Enhanced no detection message
-        cv2.putText(frame, "🔍 Point camera at plant leaves for disease detection", 
-                   (10, height - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-        cv2.putText(frame, "📍 Ensure good lighting and focus on leaf details", 
-                   (10, height - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+        # Scanning message
+        cv2.putText(frame, "🔍 Scanning for Early Blight...", 
+                   (10, height - 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        cv2.putText(frame, "📱 Focus camera on tomato leaf spots", 
+                   (10, height - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
     
     return frame
 
 def main():
-    """Main webcam testing function"""
-    print("🍃 Starting AgroRakshak Webcam Plant Disease Detection...")
-    print("📊 Model: 99.5% mAP50 accuracy")
-    print("🎥 Loading webcam and model...")
+    print("🍅 AgroRakshak Early Blight Specialist")
+    print("🎯 Optimized for detecting Tomato Early Blight")
+    print("="*50)
     
-    # Load your trained model
+    # Initialize detector
     try:
-        model = YOLO('training/results/gpu_optimized/weights/best.pt')
-        print("✅ Model loaded successfully")
+        detector = EarlyBlightDetector('training/results/gpu_optimized/weights/best.pt')
+        print("✅ Early Blight specialist model loaded")
     except Exception as e:
         print(f"❌ Error loading model: {e}")
-        print("Make sure the model path is correct")
         return
     
     # Initialize webcam
     cap = cv2.VideoCapture(0)
-    
     if not cap.isOpened():
-        print("❌ Error: Could not open webcam")
+        print("❌ Could not open webcam")
         return
     
-    # Set webcam properties
+    # Optimize webcam settings for disease detection
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_BRIGHTNESS, 0.6)
+    cap.set(cv2.CAP_PROP_CONTRAST, 0.7)
     
-    print("✅ Webcam initialized")
-    print("\n🎮 Controls:")
-    print("   'q' - Quit")
-    print("   's' - Save current frame")
-    print("   'r' - Reset/refresh")
-    print("\n📍 Instructions:")
-    print("   1. Point camera at plant leaves")
-    print("   2. Get close enough to see leaf details")
-    print("   3. Ensure good lighting")
-    print("   4. Hold steady for best results")
-    print("\n🚀 Starting real-time detection...")
-    
-    # FPS calculation
-    fps_counter = 0
-    fps_timer = time.time()
-    fps = 0
+    print("🎥 Camera ready for Early Blight detection")
+    print("💡 TIPS for better detection:")
+    print("   • Get close to tomato leaves with spots")
+    print("   • Ensure good, even lighting")
+    print("   • Look for dark, concentric ring patterns")
+    print("   • Hold camera steady")
+    print("="*50)
     
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
-                print("❌ Error reading from webcam")
                 break
             
-            # Flip frame horizontally for mirror effect
             frame = cv2.flip(frame, 1)
             
-            # Run inference
-            start_time = time.time()
-            results = model(frame, conf=0.3, iou=0.5, verbose=False)  # Lower confidence for demo
-            inference_time = (time.time() - start_time) * 1000
+            # Enhanced preprocessing for early blight
+            enhanced_frame = detector.enhance_for_early_blight(frame)
             
-            # Calculate FPS
-            fps_counter += 1
-            if time.time() - fps_timer >= 1.0:
-                fps = fps_counter
-                fps_counter = 0
-                fps_timer = time.time()
+            # Multi-scale detection
+            detection = detector.detect_with_multi_scale(enhanced_frame)
             
-            # Draw predictions on frame
-            frame = draw_predictions(frame, results, fps)
+            # Display results
+            display_frame = draw_early_blight_results(frame, detection)
             
-            # Add performance info
-            cv2.putText(frame, f"Inference: {inference_time:.1f}ms", 
-                       (10, frame.shape[0] - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            # Show frame
+            cv2.imshow('Early Blight Specialist - AgroRakshak', display_frame)
             
-            # Display frame
-            cv2.imshow('AgroRakshak - Plant Disease Detection', frame)
-            
-            # Handle key presses
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
-                print("👋 Exiting webcam test...")
                 break
-            elif key == ord('s'):
-                # Save current frame
+            elif key == ord('s') and detection:
+                # Save detection
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
-                filename = f"agrorakshak_detection_{timestamp}.jpg"
-                cv2.imwrite(filename, frame)
-                print(f"💾 Saved frame: {filename}")
-            elif key == ord('r'):
-                print("🔄 Refreshing...")
-            
+                filename = f"early_blight_detection_{timestamp}.jpg"
+                cv2.imwrite(filename, display_frame)
+                print(f"💾 Early Blight detection saved: {filename}")
+    
     except KeyboardInterrupt:
-        print("\n⚠️  Interrupted by user")
-    except Exception as e:
-        print(f"❌ Error during detection: {e}")
+        print("\n🛑 Early Blight detection stopped")
     finally:
-        # Cleanup
         cap.release()
         cv2.destroyAllWindows()
-        print("✅ Webcam test completed")
+        print("✅ Early Blight specialist shutdown")
 
 if __name__ == "__main__":
     main()
